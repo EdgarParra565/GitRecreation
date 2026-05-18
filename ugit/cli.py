@@ -1,5 +1,6 @@
 import argparse
 import os
+import subprocess
 import sys
 import textwrap
 
@@ -47,20 +48,28 @@ def parse_args():
 
     checkout_parser = commands.add_parser('checkout')
     checkout_parser.set_defaults(func=checkout)
-    checkout_parser.add_argument('oid', type=oid)
+    checkout_parser.add_argument('commit')
 
     tag_parser = commands.add_parser('tag')
     tag_parser.set_defaults(func=tag)
     tag_parser.add_argument('name')
     tag_parser.add_argument('oid', default='@', type=oid, nargs='?')
 
+    branch_parser = commands.add_parser('branch')
+    branch_parser.set_defaults(func=branch)
+    branch_parser.add_argument('name', nargs='?')
+    branch_parser.add_argument('start_point', default='@', type=oid, nargs='?')
+
     k_parser = commands.add_parser('k')
     k_parser.set_defaults(func=k)
+
+    status_parser = commands.add_parser('status')
+    status_parser.set_defaults(func=status)
 
     return parser.parse_args()
 
 def init(args):
-    data.init()
+    base.init()
     print(f'Initialized empty ugit repository in {os.getcwd()}/{data.GIT_DIR}')
 
 def hash_object(args):
@@ -81,22 +90,57 @@ def commit(args):
     print(base.commit(args.message))
 
 def log(args):
-    oid = args.oid
-    while oid:
+    for oid in base.iter_commits_and_parents({args.oid}):
         commit = base.get_commit(oid)
 
         print(f'commit{oid}\n')
         print(textwrap.indent(commit.message, '    '))
         print('')
 
-        oid = commit.parent
-
 def checkout(args):
-    base.checkout(args.oid)
+    base.checkout(args.commit)
 
 def tag(args):
     base.create_tag(args.name, args.oid)
 
+def branch(args):
+    if not args.name:
+        current = base.get_branch_name()
+        for branch in base.iter_branch_names():
+            prefix = '*' if branch == current else ' '
+            print(f'{prefix} {branch}')
+    else:
+        base.create_branch(args.name, args.start_point)
+        print(f'Branch {args.name} created at {args.start_point[:10]}')
+
 def k(args):
-    for refname, ref in data.iter_refs():
-        print(refname, ref)
+    dot = 'digraph commits {\n'
+
+    oids = set()
+    for refname, ref in data.iter_refs(deref=False):
+        dot += f'"{refname}" [shape=note]\n'
+        dot += f'"{refname}" -> "{ref.value}"\n'
+        if not ref.symbolic:
+            oids.add(ref.value)
+
+    for oid in base.iter_commits_and_parents(oids):
+        commit = base.get_commit(oid)
+        dot += f'"{oid}" [shape=box style=filled label="{oid[:10]}"]\n'
+        if commit.parent:
+            dot += f'"{oid}" -> "{commit.parent}"\n'
+
+    dot += '}'
+    print(dot)
+
+    with subprocess.Popen(
+        ['dot', '-Tgtk', '/dev/stdin'],
+        stdin=subprocess.PIPE) as proc:
+        proc.communicate(dot.encode())
+
+def status(args):
+    HEAD = base.get_oid('@')
+    branch = base.get_branch_name()
+    if branch:
+        print(f'On branch {branch}')
+    else:
+        print(f'HEAD detached at {HEAD[:10]}')
