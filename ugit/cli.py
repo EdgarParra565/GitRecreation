@@ -7,11 +7,12 @@ import textwrap
 from . import base
 from . import data
 from . import diff
-
+from . import remote
 
 def main():
-    args = parse_args()
-    args.func(args)
+    with data.change_git_dir('.'):
+        args = parse_args()
+        args.func(args)
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -50,6 +51,11 @@ def parse_args():
     show_parser.set_defaults(func=show)
     show_parser.add_argument('oid', default='@', type=oid, nargs='?')
 
+    diff_parser = commands.add_parser('diff')
+    diff_parser.set_defaults(func=_diff)
+    diff_parser.add_argument('--cached', action='store_true')
+    diff_parser.add_argument('commit', nargs='?')
+
     checkout_parser = commands.add_parser('checkout')
     checkout_parser.set_defaults(func=checkout)
     checkout_parser.add_argument('commit')
@@ -73,6 +79,28 @@ def parse_args():
     reset_parser = commands.add_parser('reset')
     reset_parser.set_defaults(func=reset)
     reset_parser.add_argument('commit', type=oid)
+
+    merge_parser = commands.add_parser('merge')
+    merge_parser.set_defaults(func=merge)
+    merge_parser.add_argument('commit', type=oid)
+
+    merge_base_parser = commands.add_parser('merge_base')
+    merge_base_parser.set_defaults(func=merge_base)
+    merge_base_parser.add_argument('commit1', type=oid)
+    merge_base_parser.add_argument('commit2', type=oid)
+
+    fetch_parser = commands.add_parser('fetch')
+    fetch_parser.set_defaults(func=fetch)
+    fetch_parser.add_argument('remote')
+
+    push_parser = commands.add_parser('push')
+    push_parser.set_defaults(func=push)
+    push_parser.add_argument('remote')
+    push_parser.add_argument('branch')
+
+    add_parser = commands.add_parser('add')
+    add_parser.set_defaults(func=add)
+    add_parser.add_argument('files', nargs='+')
 
     return parser.parse_args()
 
@@ -118,12 +146,31 @@ def show(args):
     commit = base.get(args.oid)
     parent_tree = None
     if commit.parent:
-        parent_tree = base.get_commit(commit.parent).tree
+        parent_tree = base.get_commit(commit.parents[0]).tree
+
     _print_commit(args.oid, commit)
     result = diff.diff_trees(
         base.get_tree(parent_tree, base.get_tree(commit.tree))
     )
-    print(result)
+    sys.stdout.flush()
+    sys.stdout.buffer.write(result)
+
+def _diff(args):
+    oid = args.commit and base.get_oid(args.commit)
+    if args.commit:
+        tree_from = base.get_tree(oid and base.get_commit(oid).tree)
+    if args.cached:
+        tree_to = base.get_index_tree()
+        if not args.commit:
+            oid = base.get_oid('@')
+            tree_from = base.get_tree(oid and base.get_commit(oid).tree)
+    else:
+        tree_to = base.get_working_tree()
+        if not args.commit:
+            tree_from = base.get_index_tree()
+    result = diff.diff_trees(tree_from, tree_to)
+    sys.stdout.flush()
+    sys.stdout.buffer.write(result)
 
 def checkout(args):
     base.checkout(args.commit)
@@ -154,8 +201,8 @@ def k(args):
     for oid in base.iter_commits_and_parents(oids):
         commit = base.get_commit(oid)
         dot += f'"{oid}" [shape=box style=filled label="{oid[:10]}"]\n'
-        if commit.parent:
-            dot += f'"{oid}" -> "{commit.parent}"\n'
+        for parent in commit.parents:
+            dot += f'"{oid}" -> "{parent}"\n'
 
     dot += '}'
     print(dot)
@@ -173,5 +220,32 @@ def status(args):
     else:
         print(f'HEAD detached at {HEAD[:10]}')
 
+    MERGE_HEAD = data.get_ref('MERGE_HEAD').value
+    if MERGE_HEAD:
+        print(f'Merging with {MERGE_HEAD[:10]}')
+
+    print('\nChanges to be commited:\n')
+    HEAD_tree = HEAD and base.get_commit(HEAD).tree
+    for path, action in diff.iter_changed_file(base.get_tree(HEAD_tree), base.get_index_tree()):
+        print(f'{action:>12}: {path}')
+    print('\nChanges not staged for commit:\n')
+    for path, action in diff.iter_changed_files(base.get_index_tree(), base.get_working_tree()):
+        print(f'{action:>12}: {path}')
+
 def reset(args):
     base.reset(args.commit)
+
+def merge(args):
+    base.merge(args.commit)
+
+def merge_base(args):
+    print(base.get_merge_base(args.commit1, args.commit2))
+
+def fetch(args):
+    remote.fetch(args.remote)
+
+def push(args):
+    remote.push(args.remote, f'refs/heads/{args.branch}')
+
+def add(args):
+    base.add(args.files)
