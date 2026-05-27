@@ -1,3 +1,5 @@
+"""Command-line interface for the ugit educational Git implementation."""
+
 import argparse
 import os
 import subprocess
@@ -10,11 +12,13 @@ from . import diff
 from . import remote
 
 def main():
+    """Run ugit from the current directory and dispatch to a subcommand."""
     with data.change_git_dir('.'):
         args = parse_args()
         args.func(args)
 
 def parse_args():
+    """Create the argparse command tree and return the parsed command args."""
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest = "command")
     commands.required = True
@@ -105,33 +109,41 @@ def parse_args():
     return parser.parse_args()
 
 def init(args):
+    """Initialize a new .ugit directory in the current working directory."""
     base.init()
     print(f'Initialized empty ugit repository in {os.getcwd()}/{data.GIT_DIR}')
 
 def hash_object(args):
+    """Hash a file as a blob object and print the resulting object id."""
     with open(args.file, 'rb') as f:
         print(data.hash_object(f.read()))
 
 def cat_file(args):
+    """Print the raw content for an object id, regardless of object type."""
     sys.stdout.flush()
     sys.stdout.buffer.write(data.get_object(args.object, expected=None))
 
 def write_tree(args):
+    """Write the current index as a tree object and print its object id."""
     print(base.write_tree(args))
 
 def read_tree(args):
+    """Replace the index with the contents of the provided tree object."""
     base.read_tree(args.tree)
 
 def commit(args):
+    """Create a commit from the current index using the provided message."""
     print(base.commit(args.message))
 
 def _print_commit(oid, commit, refs=None):
+    """Print one commit with optional ref names pointing at that commit."""
     refs_str = f' ({", ".join(refs)})' if refs else ''
     print(f'commit {oid}{refs_str}\n')
     print(textwrap.indent(commit.message, '    '))
     print('')
 
 def log(args):
+    """Walk commit history from a starting commit and print each commit."""
     refs = {}
     for refname, ref in data.iter_refs():
         refs.setdefault(ref.value, []).append(refname)
@@ -141,6 +153,7 @@ def log(args):
         _print_commit(oid, commit, refs.get(oid))
 
 def show(args):
+    """Show one commit followed by the diff from its first parent."""
     if not args.oid:
         return
     commit = base.get(args.oid)
@@ -156,6 +169,7 @@ def show(args):
     sys.stdout.buffer.write(result)
 
 def _diff(args):
+    """Show differences between commits, the index, and the working tree."""
     oid = args.commit and base.get_oid(args.commit)
     if args.commit:
         tree_from = base.get_tree(oid and base.get_commit(oid).tree)
@@ -173,12 +187,15 @@ def _diff(args):
     sys.stdout.buffer.write(result)
 
 def checkout(args):
+    """Check out a branch or commit into the index and working tree."""
     base.checkout(args.commit)
 
 def tag(args):
+    """Create a lightweight tag pointing at the selected object id."""
     base.create_tag(args.name, args.oid)
 
 def branch(args):
+    """List branches or create a branch at the requested start point."""
     if not args.name:
         current = base.get_branch_name()
         for branch in base.iter_branch_names():
@@ -189,6 +206,7 @@ def branch(args):
         print(f'Branch {args.name} created at {args.start_point[:10]}')
 
 def k(args):
+    """Print and display a Graphviz graph of refs and commit parents."""
     dot = 'digraph commits {\n'
 
     oids = set()
@@ -213,6 +231,7 @@ def k(args):
         proc.communicate(dot.encode())
 
 def status(args):
+    """Print branch state plus staged and unstaged file changes."""
     HEAD = base.get_oid('@')
     branch = base.get_branch_name()
     if branch:
@@ -233,19 +252,25 @@ def status(args):
         print(f'{action:>12}: {path}')
 
 def reset(args):
+    """Move HEAD to another commit without changing the working tree."""
     base.reset(args.commit)
 
 def merge(args):
+    """Merge another commit into the current branch."""
     base.merge(args.commit)
 
 def merge_base(args):
+    """Print the first common ancestor found for two commits."""
     print(base.get_merge_base(args.commit1, args.commit2))
 
 def fetch(args):
+    """Fetch refs and objects from a remote repository path."""
     remote.fetch(args.remote)
 
 def push(args):
+    """Push a local branch to the matching branch ref on a remote path."""
     remote.push(args.remote, f'refs/heads/{args.branch}')
 
 def add(args):
+    """Hash files and directories into the index for the next commit."""
     base.add(args.files)

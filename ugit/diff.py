@@ -1,3 +1,5 @@
+"""Tree comparison, diff, and merge helpers for ugit object contents."""
+
 import subprocess
 
 from collections import defaultdict
@@ -6,6 +8,7 @@ from tempfile import NamedTemporaryFile as Temp
 from . import data
 
 def compare_trees(*trees):
+    """Yield each path with the object id from every input tree."""
     entries = defaultdict(lambda: [None] * len(trees))
     for i, tree in enumerate(trees):
         for path, oid in tree.items():
@@ -14,6 +17,7 @@ def compare_trees(*trees):
         yield (path, *oids)
 
 def iter_changed_files(t_from, t_to):
+    """Yield paths whose object ids differ between two tree dictionaries."""
     for path, o_from, o_to in compare_trees(t_from, t_to):
         if o_from != o_to:
             action = ('new file' if not o_from else
@@ -22,6 +26,7 @@ def iter_changed_files(t_from, t_to):
             yield path, action
 
 def diff_trees(t_from, t_to):
+    """Return a unified diff for every changed blob between two trees."""
     output = 'b'
     for path, o_from, o_to in compare_trees(t_from, t_to):
         if o_from != o_to:
@@ -29,6 +34,7 @@ def diff_trees(t_from, t_to):
     return output
 
 def diff_blobs(o_from, o_to, path='blob'):
+    """Run the system diff command against two blob objects."""
     with Temp() as f_from, Temp() as f_to:
         for oid, f in ((o_from, f_from), (o_to, f_to)):
             if oid:
@@ -41,6 +47,7 @@ def diff_blobs(o_from, o_to, path='blob'):
         return output
 
 def merge_trees(t_base, t_HEAD, t_other):
+    """Merge matching paths from base, HEAD, and another tree."""
     tree = {}
     for path, o_base, o_HEAD, o_other in compare_trees(t_base, t_HEAD, t_other):
         tree[path] = data.hash_object(merge_blobs(o_base, o_HEAD, o_other))
@@ -48,6 +55,7 @@ def merge_trees(t_base, t_HEAD, t_other):
 
 
 def merge_blobs(o_base, o_HEAD, o_other):
+    """Run diff3 to produce merged content for three blob versions."""
     with Temp() as f_base, Temp() as f_HEAD, Temp() as f_other:
         for oid, f in ((o_base, f_base), (o_HEAD, f_HEAD), (o_other, f_other)):
             if oid:
@@ -59,4 +67,3 @@ def merge_blobs(o_base, o_HEAD, o_other):
             output, _ = proc.communicate()
             assert proc.returncode in (0,1)
         return output
-

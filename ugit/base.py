@@ -1,3 +1,5 @@
+"""Core repository operations for the ugit educational version-control tool."""
+
 import itertools
 import operator
 import os
@@ -9,10 +11,12 @@ from . import data
 from . import diff
 
 def init():
+    """Initialize object storage and create HEAD pointing at master."""
     data.init()
     data.update_ref('HEAD', data.RefValue(symbolic=True, value='refs/heads/master'))
 
 def write_tree():
+    """Write the index as nested tree objects and return the root tree id."""
     index_as_tree = {}
     with data.get_index() as index:
         for path, oid in index.items():
@@ -24,6 +28,7 @@ def write_tree():
                 current = current.setdefault(dirname, {})
 
     def write_tree_recursive(tree_dict):
+        """Write one tree dictionary and any nested child trees."""
         entries = []
         for name, value in tree_dict.items():
             if type(value) is dict:
@@ -40,6 +45,7 @@ def write_tree():
     return write_tree_recursive(index_as_tree)
 
 def _iter_tree_entries(oid):
+    """Yield raw tree entries as type, object id, and name tuples."""
     if not oid:
         return
     tree = data.get_object(oid, 'tree')
@@ -48,6 +54,7 @@ def _iter_tree_entries(oid):
         yield type_, oid, name
 
 def get_tree(oid, base_path=''):
+    """Expand a tree object into a flat path-to-object-id dictionary."""
     result = {}
     for type_, oid, name in _iter_tree_entries(oid):
         assert '/' not in name
@@ -62,6 +69,7 @@ def get_tree(oid, base_path=''):
     return result
 
 def get_working_tree():
+    """Hash non-ignored working-directory files into a tree dictionary."""
     result = {}
     for root, _, filenames in os.walk('.'):
         for filename in filenames:
@@ -73,10 +81,12 @@ def get_working_tree():
     return result
 
 def get_index_tree():
+    """Return the current index as a path-to-object-id dictionary."""
     with data.get_index() as index:
         return index
 
 def _empty_current_directory():
+    """Remove all non-ignored files and empty directories from the workspace."""
     for root, dirnames, filesnames in os.walk('.', topdown=False):
         for filename in filesnames:
             path = os.path.relpath(f'{root}/{filename}')
@@ -94,6 +104,7 @@ def _empty_current_directory():
 
 
 def read_tree(tree_oid, update_working=False):
+    """Load a tree into the index and optionally check it out to disk."""
     with data.get_index() as index:
         index.clear()
         index.update(get_tree(tree_oid))
@@ -102,6 +113,7 @@ def read_tree(tree_oid, update_working=False):
             _checkout_index(index)
 
 def read_tree_merged(t_base, t_HEAD, t_other, update_working=False):
+    """Merge three trees into the index and optionally update the workspace."""
     with data.get_index() as index:
         index.clear()
         index.update(diff.merge_trees(get_tree(t_base), get_tree(t_HEAD), get_tree(t_other)))
@@ -110,6 +122,7 @@ def read_tree_merged(t_base, t_HEAD, t_other, update_working=False):
             _checkout_index(index)
 
 def _checkout_index(index):
+    """Write every blob from an index dictionary into the working tree."""
     _empty_current_directory()
     for path, oid in index.items():
         os.makedirs(os.path.dirname(f'./{path}'), exist_ok=True)
@@ -117,6 +130,7 @@ def _checkout_index(index):
             f.write(data.get_object(oid, 'blob'))
 
 def read_tree_merged(t_base, t_HEAD, t_other):
+    """Merge three trees directly into the working tree."""
     _empty_current_directory()
     for path, blob in diff.merge_tree(get_tree(t_base), get_tree(t_HEAD),get_tree(t_other)).items():
         os.makedirs(f'./{os.path.dirname(path)}', exist_ok=True)
@@ -124,6 +138,7 @@ def read_tree_merged(t_base, t_HEAD, t_other):
             f.write(blob)
 
 def commit(message):
+    """Create a commit object from the index and update HEAD."""
     commit = f'tree {write_tree()}\n'
 
     HEAD = data.get_ref('HEAD').value
@@ -143,6 +158,7 @@ def commit(message):
     return oid
 
 def checkout(name):
+    """Check out a branch name or commit id and update HEAD accordingly."""
     oid = get_oid(name)
     commit = get_commit(oid)
     read_tree(commit.tree, update_working=True)
@@ -155,9 +171,11 @@ def checkout(name):
     data.update_ref('HEAD', HEAD, deref=False)
 
 def reset(oid):
+    """Move HEAD to a new object id without touching files or the index."""
     data.update_ref('HEAD', data.RefValue(symbolic=False, value=oid))
 
 def merge(other):
+    """Merge another commit into HEAD using a merge base when needed."""
     HEAD = data.get_ref('HEAD').value
     assert HEAD
     merge_base = get_merge_base(other, HEAD)
@@ -177,6 +195,7 @@ def merge(other):
     print('Merged in working tree\nCommit')
 
 def get_merge_base(oid1, oid2):
+    """Return the first common commit found between two histories."""
     parents1 = set(iter_commits_and_parents({oid1}))
 
     for oid in iter_commits_and_parents({oid2}):
@@ -184,22 +203,28 @@ def get_merge_base(oid1, oid2):
             return oid
 
 def is_ancestor_of(commit, maybe_ancestor):
+    """Return whether maybe_ancestor appears in commit's parent history."""
     return maybe_ancestor in iter_commits_and_parents({commit})
 
 def create_tag(name, oid):
+    """Create or update a tag ref to point at an object id."""
     data.update_ref(f'refs/tags/{name}', data.RefValue(symbolic=False, value=oid))
 
 def iter_branch_names():
+    """Yield local branch names from refs/heads."""
     for refname, _ in data.iter_refs('refs/heads/'):
         yield os.path.relpath(refname, 'refs/heads/')
 
 def create_branch(name, oid):
+    """Create a branch ref pointing at the selected object id."""
     data.update_ref(f'refs/head/{name}', data.RefValue(symbolic=False, value=oid))
 
 def is_branch(branch):
+    """Return whether a local branch ref exists for the given name."""
     return data.get_ref(f'refs/heads/{branch}').value is not None
 
 def get_branch_name():
+    """Return the current branch name, or None when HEAD is detached."""
     HEAD = data.get_ref('HEAD', deref=False)
     if not HEAD.symbolic:
         return None
@@ -210,6 +235,7 @@ def get_branch_name():
 Commit = namedtuple('Commit', ['tree', 'parents', 'message'])
 
 def get_commit(oid):
+    """Parse a commit object into its tree id, parent ids, and message."""
     parents = []
 
     commit = data.get_object(oid, 'commit').decode()
@@ -226,6 +252,7 @@ def get_commit(oid):
     return Commit(tree=tree, parents=parents, message=message)
 
 def iter_commits_and_parents(oids):
+    """Walk commits and their parents, yielding each object id once."""
     oids = deque(oids)
     visited = set()
     while oids:
@@ -240,8 +267,10 @@ def iter_commits_and_parents(oids):
         oids.extend(commit.parents[1:])
 
 def iter_objects_in_commits(oids):
+    """Yield commits, trees, and blobs reachable from commit ids."""
     visited = set()
     def iter_object_in_tree(oid):
+        """Recursively yield a tree and all objects contained in it."""
         visited.add(oid)
         yield oid
         for type_, oid, _ in _iter_tree_entries(oid):
@@ -259,6 +288,7 @@ def iter_objects_in_commits(oids):
             yield from iter_object_in_tree(commit.tree)
 
 def get_oid(name):
+    """Resolve @, refs, tags, branches, or full hex ids to an object id."""
     if name == '@': name = 'HEAD'
 
     refs_to_try = [
@@ -277,14 +307,17 @@ def get_oid(name):
     assert False, f'Unknown name {name}'
 
 def add(filenames):
+    """Add files or directories to the index by hashing their contents."""
 
     def add_file(filename):
+        """Hash one file and store its path in the index."""
         filename = os.path.relpath(filename)
         with open(filename, 'rb') as f:
             oid = data.hash_object(f.read())
         index[filename] = oid
 
     def add_directory(dirname):
+        """Walk a directory and add each non-ignored file."""
         for root, _, filenames in os.walk(dirname):
             for filename in filenames:
                 path = os.path.relpath(f'{root}/{filename}')
@@ -301,4 +334,5 @@ def add(filenames):
 
 
 def is_ignored(path):
+    """Return whether a path belongs to ugit's private metadata directory."""
     return '.ugit' in path.split('/')

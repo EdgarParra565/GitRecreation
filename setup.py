@@ -1,3 +1,5 @@
+"""Packaging configuration for installing the ugit console script."""
+
 from setuptools import setup
 
 setup (name = 'ugit',
